@@ -53,7 +53,7 @@ class WeatherService {
         '?latitude=$lat&longitude=$lon'
         '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m'
         '&daily=temperature_2m_max,temperature_2m_min,weather_code'
-        '&models=best_match&timezone=auto';
+        '&models=gfs_seamless&timezone=auto&temperature_unit=celsius';
 
     // Fetch Air Quality
     final aqiUrl = 'https://air-quality-api.open-meteo.com/v1/air-quality'
@@ -75,6 +75,8 @@ class WeatherService {
     if (weatherRes.statusCode != 200) throw Exception('Weather fetch failed');
 
     final weather = json.decode(weatherRes.body);
+    print('DEBUG: RAW WEATHER: $weather'); // SEE REAL DATA
+    
     final current = weather['current'];
     final daily = weather['daily'];
 

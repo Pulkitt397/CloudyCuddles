@@ -99,6 +99,8 @@ class _MainScaffoldState extends State<MainScaffold> {
       }
     } catch (e) {
       print('Location Error: $e');
+      // Bug Fix: Ensure loading state is reset even on error
+      setState(() => _isLoading = false); 
       await _fetchWeather("Alwar");
     }
   }
@@ -535,11 +537,14 @@ class MediumWidget extends StatelessWidget {
         ]),
         const Divider(),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(color: aqiColor.withOpacity(isDark ? 0.3 : 0.2), borderRadius: BorderRadius.circular(20)),
-            child: Text('AQI $aqi', style: TextStyle(color: aqiColor, fontWeight: FontWeight.bold, fontSize: 12)),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(color: aqiColor.withOpacity(isDark ? 0.3 : 0.2), borderRadius: BorderRadius.circular(20)),
+              child: Text('AQI $aqi', style: TextStyle(color: aqiColor, fontWeight: FontWeight.bold, fontSize: 12), overflow: TextOverflow.ellipsis),
+            ),
           ),
+          const SizedBox(width: 8),
           Text('H:$high° L:$low°', style: const TextStyle(fontSize: 14)),
         ]),
       ]),
