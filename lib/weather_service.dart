@@ -8,18 +8,25 @@ class WeatherService {
   Future<Map<String, dynamic>> getWeather(String cityName) async {
     final clean = cityName.split(',')[0].trim();
     final encoded = Uri.encodeComponent(clean);
-    final geoUrl = 'https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=1&language=en&format=json';
+    final geoUrl = 'https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=10&language=en&format=json';
     
     final geoRes = await http.get(Uri.parse(geoUrl));
     if (geoRes.statusCode != 200) throw Exception('Geocoding failed');
 
     final geoData = json.decode(geoRes.body);
-    final results = geoData['results'];
-    if (results == null || results.isEmpty) throw Exception('City not found');
+    if (geoData['results'] == null || geoData['results'].isEmpty) {
+      throw Exception('City not found');
+    }
+    
+    // Pick India (IN) if available
+    var best = geoData['results'][0];
+    for (var r in geoData['results']) {
+      if (r['country_code'] == 'IN') { best = r; break; }
+    }
 
-    final lat = results[0]['latitude'];
-    final lon = results[0]['longitude'];
-    final name = results[0]['name'];
+    final lat = best['latitude'];
+    final lon = best['longitude'];
+    final name = best['name'];
 
     return await fetchFullWeather(lat, lon, name);
   }
@@ -46,12 +53,15 @@ class WeatherService {
         '?latitude=$lat&longitude=$lon'
         '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m'
         '&daily=temperature_2m_max,temperature_2m_min,weather_code'
-        '&timezone=auto';
+        '&models=best_match&timezone=auto';
 
     // Fetch Air Quality
     final aqiUrl = 'https://air-quality-api.open-meteo.com/v1/air-quality'
         '?latitude=$lat&longitude=$lon'
-        '&current=european_aqi';
+        '&current=us_aqi';
+    
+    print('DEBUG: City=$cityName Coords=$lat,$lon');
+    print('DEBUG: WeatherURL=$weatherUrl');
 
     // Fire both requests in parallel
     final responses = await Future.wait([
@@ -73,7 +83,8 @@ class WeatherService {
     try {
       if (aqiRes.statusCode == 200) {
         final aqiData = json.decode(aqiRes.body);
-        aqi = (aqiData['current']?['european_aqi'] ?? 0).toInt();
+        aqi = (aqiData['current']?['us_aqi'] ?? 0).toInt();
+        print('DEBUG: US AQI=$aqi');
       }
     } catch (_) {}
 
@@ -155,21 +166,21 @@ class WeatherService {
 
   /// AQI level description
   static String aqiLabel(int aqi) {
-    if (aqi <= 20) return 'Good';
-    if (aqi <= 40) return 'Fair';
-    if (aqi <= 60) return 'Moderate';
-    if (aqi <= 80) return 'Poor';
-    if (aqi <= 100) return 'Very Poor';
+    if (aqi <= 50) return 'Good';
+    if (aqi <= 100) return 'Moderate';
+    if (aqi <= 150) return 'Unhealthy (Sensitive)';
+    if (aqi <= 200) return 'Unhealthy';
+    if (aqi <= 300) return 'Very Unhealthy';
     return 'Hazardous';
   }
 
   /// AQI color
   static int aqiColorValue(int aqi) {
-    if (aqi <= 20) return 0xFF4CAF50; // green
-    if (aqi <= 40) return 0xFF8BC34A; // light green
-    if (aqi <= 60) return 0xFFFFEB3B; // yellow
-    if (aqi <= 80) return 0xFFFF9800; // orange
-    if (aqi <= 100) return 0xFFF44336; // red
-    return 0xFF9C27B0; // purple
+    if (aqi <= 50) return 0xFF4CAF50; // green
+    if (aqi <= 100) return 0xFFFFEB3B; // yellow
+    if (aqi <= 150) return 0xFFFF9800; // orange
+    if (aqi <= 200) return 0xFFF44336; // red
+    if (aqi <= 300) return 0xFF9C27B0; // purple
+    return 0xFF7E0023; // maroon
   }
 }
