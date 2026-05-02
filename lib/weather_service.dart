@@ -50,12 +50,21 @@ class WeatherService {
 
   Future<List<dynamic>> searchCities(String query) async {
     if (query.length < 3) return [];
+    
+    // Using Teleport API for a more comprehensive city search
     final response = await http.get(
-      Uri.parse('https://api.openweathermap.org/geo/1.0/direct?q=$query&limit=5&appid=$apiKey'),
+      Uri.parse('https://api.teleport.org/api/cities/?search=$query'),
     );
 
     if (response.statusCode == 200) {
-      return json.decode(response.body);
+      final data = json.decode(response.body);
+      final suggestions = data['_embedded']['city:search-results'] as List;
+      
+      // We'll return them in a format similar to what we had before
+      return suggestions.map((s) => {
+        'name': s['matching_full_name'].split(',')[0].trim(),
+        'full_name': s['matching_full_name'],
+      }).toList();
     } else {
       return [];
     }

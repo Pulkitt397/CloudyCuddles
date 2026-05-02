@@ -162,6 +162,7 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   void _showSearch() {
     List<dynamic> suggestions = [];
+    bool isSearching = false;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -175,11 +176,25 @@ class _MainScaffoldState extends State<MainScaffold> {
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 24),
             TextField(
-              decoration: InputDecoration(hintText: "Search city...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(16))),
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: "Search city...", 
+                prefixIcon: const Icon(Icons.search), 
+                suffixIcon: isSearching ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))) : null,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+              ),
               onChanged: (value) async {
                 if (value.length >= 3) {
-                  final results = await _weatherService.searchCities(value);
-                  setSheetState(() => suggestions = results);
+                  setSheetState(() => isSearching = true);
+                  try {
+                    final results = await _weatherService.searchCities(value);
+                    setSheetState(() {
+                      suggestions = results;
+                      isSearching = false;
+                    });
+                  } catch (e) {
+                    setSheetState(() => isSearching = false);
+                  }
                 } else {
                   setSheetState(() => suggestions = []);
                 }
@@ -187,21 +202,22 @@ class _MainScaffoldState extends State<MainScaffold> {
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: ListView.builder(
-                itemCount: suggestions.length,
-                itemBuilder: (context, index) {
-                  final city = suggestions[index];
-                  return ListTile(
-                    leading: const Icon(Icons.location_city, color: Colors.lightBlue),
-                    title: Text("${city['name']}, ${city['country']}"),
-                    subtitle: Text(city['state'] ?? ""),
-                    onTap: () {
-                      _fetchWeather(city['name']);
-                      Navigator.pop(context);
+              child: suggestions.isEmpty && !isSearching
+                ? const Center(child: Text("Type 3 characters to search...", style: TextStyle(color: Colors.grey)))
+                : ListView.builder(
+                    itemCount: suggestions.length,
+                    itemBuilder: (context, index) {
+                      final city = suggestions[index];
+                      return ListTile(
+                        leading: const Icon(Icons.location_city, color: Colors.lightBlue),
+                        title: Text(city['full_name'] ?? city['name']),
+                        onTap: () {
+                          _fetchWeather(city['name']);
+                          Navigator.pop(context);
+                        },
+                      );
                     },
-                  );
-                },
-              ),
+                  ),
             ),
           ]),
         ),
