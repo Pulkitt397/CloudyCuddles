@@ -117,7 +117,7 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   Future<void> _fetchWeatherByCoords(double lat, double lon) async {
     final data = await _weatherService.getWeatherByCoords(lat, lon);
-    final temp = data['main']['temp'].toStringAsFixed(0);
+    final temp = (data['main']?['temp'] ?? 0).toStringAsFixed(0);
     setState(() {
       _weatherData = data;
       _currentLocation = data['name'];
@@ -130,7 +130,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     setState(() => _isLoading = true);
     try {
       final data = await _weatherService.getWeather(city);
-      final temp = data['main']['temp'].toStringAsFixed(0);
+      final temp = (data['main']?['temp'] ?? 0).toStringAsFixed(0);
       setState(() {
         _weatherData = data;
         _currentLocation = city;
@@ -279,10 +279,10 @@ class WeatherDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final city = data['name'];
-    final temp = data['main']['temp'].toStringAsFixed(0);
-    final high = data['main']['temp_max'].toStringAsFixed(0);
-    final low = data['main']['temp_min'].toStringAsFixed(0);
+    final city = data['name'] ?? 'Unknown';
+    final temp = (data['main']?['temp'] ?? 0).toStringAsFixed(0);
+    final high = (data['main']?['temp_max'] ?? 0).toStringAsFixed(0);
+    final low = (data['main']?['temp_min'] ?? 0).toStringAsFixed(0);
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     return SafeArea(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20.0), child: Column(children: [
