@@ -138,6 +138,7 @@ class _MainScaffoldState extends State<MainScaffold> {
       });
       _updateHomeWidget(city, temp);
     } catch (e) {
+      print('Weather Fetch Error: $e');
       setState(() => _isLoading = false);
     }
   }

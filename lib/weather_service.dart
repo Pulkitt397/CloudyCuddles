@@ -6,12 +6,16 @@ class WeatherService {
 
   Future<Map<String, dynamic>> getWeather(String cityName) async {
     // 1. Get coordinates for the city name
-    final encodedCity = Uri.encodeComponent(cityName);
-    final geoResponse = await http.get(
-      Uri.parse('https://geocoding-api.open-meteo.com/v1/search?name=$encodedCity&count=1&language=en&format=json'),
-    );
+    // Focus on the city name part for better geocoding results
+    final cleanCityName = cityName.split(',')[0].trim();
+    final encodedCity = Uri.encodeComponent(cleanCityName);
+    final geoUrl = 'https://geocoding-api.open-meteo.com/v1/search?name=$encodedCity&count=1&language=en&format=json';
+    print('Geocoding city: $cleanCityName (Full: $cityName)');
+    
+    final geoResponse = await http.get(Uri.parse(geoUrl));
 
     if (geoResponse.statusCode == 200) {
+      print('Geocoding successful for $cityName');
       final geoData = json.decode(geoResponse.body);
       if (geoData['results'] == null || geoData['results'].isEmpty) {
         throw Exception('City not found');
@@ -34,12 +38,14 @@ class WeatherService {
   }
 
   Future<Map<String, dynamic>> _fetchOpenMeteoData(double lat, double lon, String cityName) async {
-    final response = await http.get(
-      Uri.parse('https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto'),
-    );
+    final url = 'https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto';
+    print('Fetching weather from: $url');
+    
+    final response = await http.get(Uri.parse(url));
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
+      print('Weather data received for $cityName');
       
       // Formatting the data so it matches exactly what our UI expects!
       return {
@@ -59,19 +65,19 @@ class WeatherService {
   Future<List<dynamic>> searchCities(String query) async {
     if (query.isEmpty) return [];
     
-    // Using Teleport API for the instant search bar
     final encodedQuery = Uri.encodeComponent(query);
     final response = await http.get(
-      Uri.parse('https://api.teleport.org/api/cities/?search=$encodedQuery'),
+      Uri.parse('https://geocoding-api.open-meteo.com/v1/search?name=$encodedQuery&count=10&language=en&format=json'),
     );
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-      final suggestions = data['_embedded']['city:search-results'] as List;
+      if (data['results'] == null) return [];
       
-      return suggestions.map((s) => {
-        'name': s['matching_full_name'].split(',')[0].trim(),
-        'full_name': s['matching_full_name'],
+      final results = data['results'] as List;
+      return results.map((s) => {
+        'name': s['name'],
+        'full_name': "${s['name']}, ${s['admin1'] ?? ''} ${s['country']}",
       }).toList();
     } else {
       return [];
