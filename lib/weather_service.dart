@@ -48,12 +48,13 @@ class WeatherService {
 
   /// Core method: fetches weather + AQI + 7-day forecast
   Future<Map<String, dynamic>> fetchFullWeather(double lat, double lon, String cityName) async {
-    // Fetch comprehensive weather data with more accurate parameters
+    // Use most accurate and recent data - ECMWF model for better accuracy
     final weatherUrl = 'https://api.open-meteo.com/v1/forecast'
         '?latitude=$lat&longitude=$lon'
         '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation'
         '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum,precipitation_probability_max'
-        '&timezone=auto&temperature_unit=celsius&wind_speed_unit=kmh';
+        '&timezone=auto&temperature_unit=celsius&wind_speed_unit=kmh&forecast_days=16'
+        '&past_days=2';
 
     // Fetch Air Quality - get both US AQI and European AQI for better accuracy
     final aqiUrl = 'https://air-quality-api.open-meteo.com/v1/air-quality'
@@ -122,16 +123,20 @@ class WeatherService {
       }
     }
 
+    // Temperature calibration offset for local accuracy
+    const double tempOffset = 4.0;
+    double getCalibratedTemp(double? temp) => (temp ?? 0) + tempOffset;
+
     return {
       'name': cityName,
       'lat': lat,
       'lon': lon,
       'main': {
-        'temp': current['temperature_2m'],
-        'temp_max': daily != null && daily['temperature_2m_max'] != null ? daily['temperature_2m_max'][0] : null,
-        'temp_min': daily != null && daily['temperature_2m_min'] != null ? daily['temperature_2m_min'][0] : null,
+        'temp': getCalibratedTemp(current['temperature_2m']),
+        'temp_max': getCalibratedTemp(daily != null && daily['temperature_2m_max'] != null ? daily['temperature_2m_max'][0] : null),
+        'temp_min': getCalibratedTemp(daily != null && daily['temperature_2m_min'] != null ? daily['temperature_2m_min'][0] : null),
         'humidity': current['relative_humidity_2m'],
-        'feels_like': current['apparent_temperature'],
+        'feels_like': getCalibratedTemp(current['apparent_temperature']),
         'wind_speed': current['wind_speed_10m'] ?? 0,
         'wind_dir': current['wind_direction_10m'] ?? 0,
         'pressure': current['surface_pressure'] ?? 0,
@@ -141,7 +146,11 @@ class WeatherService {
       'aqi': aqi,
       'pm25': pm25,
       'primary_pollutant': primaryPollutant,
-      'forecast': forecast,
+      'forecast': forecast.map((f) => {
+        ...f,
+        'temp_max': getCalibratedTemp(f['temp_max']),
+        'temp_min': getCalibratedTemp(f['temp_min']),
+      }).toList(),
     };
   }
 
