@@ -48,20 +48,17 @@ class WeatherService {
 
   /// Core method: fetches weather + AQI + 7-day forecast
   Future<Map<String, dynamic>> fetchFullWeather(double lat, double lon, String cityName) async {
-    // Fetch weather with hourly data, daily forecast, and current conditions
+    // Fetch comprehensive weather data with more accurate parameters
     final weatherUrl = 'https://api.open-meteo.com/v1/forecast'
         '?latitude=$lat&longitude=$lon'
-        '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m'
-        '&daily=temperature_2m_max,temperature_2m_min,weather_code'
-        '&models=gfs_seamless&timezone=auto&temperature_unit=celsius';
+        '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation'
+        '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum,precipitation_probability_max'
+        '&timezone=auto&temperature_unit=celsius&wind_speed_unit=kmh';
 
-    // Fetch Air Quality
+    // Fetch Air Quality - get both US AQI and European AQI for better accuracy
     final aqiUrl = 'https://air-quality-api.open-meteo.com/v1/air-quality'
         '?latitude=$lat&longitude=$lon'
-        '&current=us_aqi';
-    
-    print('DEBUG: City=$cityName Coords=$lat,$lon');
-    print('DEBUG: WeatherURL=$weatherUrl');
+        '&current=us_aqi,eaqi,pm2_5,pm10,ozone,nitrogen_dioxide,sulphur_dioxide,carbon_monoxide';
 
     // Fire both requests in parallel
     final responses = await Future.wait([
@@ -75,34 +72,52 @@ class WeatherService {
     if (weatherRes.statusCode != 200) throw Exception('Weather fetch failed');
 
     final weather = json.decode(weatherRes.body);
-    print('DEBUG: RAW WEATHER: $weather'); // SEE REAL DATA
-    
     final current = weather['current'];
     final daily = weather['daily'];
 
-    // Parse AQI (graceful fallback)
+    // Parse AQI with more comprehensive data
     int aqi = 0;
+    int pm25 = 0;
+    String primaryPollutant = '';
     try {
       if (aqiRes.statusCode == 200) {
         final aqiData = json.decode(aqiRes.body);
-        aqi = (aqiData['current']?['us_aqi'] ?? 0).toInt();
-        print('DEBUG: US AQI=$aqi');
+        final aqiCurrent = aqiData['current'];
+        
+        // Use US AQI as primary, fallback to European AQI if available
+        aqi = (aqiCurrent?['us_aqi'] ?? aqiCurrent?['eaqi'] ?? 0).toInt();
+        pm25 = (aqiCurrent?['pm2_5'] ?? 0).toInt();
+        
+        // Determine primary pollutant based on values
+        final pm10 = (aqiCurrent?['pm10'] ?? 0).toInt();
+        final o3 = (aqiCurrent?['ozone'] ?? 0).toInt();
+        final no2 = (aqiCurrent?['nitrogen_dioxide'] ?? 0).toInt();
+        
+        if (pm25 > 35) primaryPollutant = 'PM2.5';
+        else if (pm10 > 55) primaryPollutant = 'PM10';
+        else if (o3 > 100) primaryPollutant = 'Ozone';
+        else if (no2 > 100) primaryPollutant = 'NO₂';
       }
     } catch (_) {}
 
-    // Build 7-day forecast
+    // Build 7-day forecast with precipitation info
     List<Map<String, dynamic>> forecast = [];
     if (daily != null && daily['time'] != null) {
       final times = daily['time'] as List;
       final maxTemps = daily['temperature_2m_max'] as List;
       final minTemps = daily['temperature_2m_min'] as List;
       final codes = daily['weather_code'] as List;
+      final precipSum = daily['precipitation_sum'] as List? ?? [];
+      final precipProb = daily['precipitation_probability_max'] as List? ?? [];
+      
       for (int i = 0; i < times.length && i < 7; i++) {
         forecast.add({
           'date': times[i],
           'temp_max': maxTemps[i],
           'temp_min': minTemps[i],
           'weather_code': codes[i],
+          'precipitation': i < precipSum.length ? precipSum[i] : 0,
+          'precip_prob': i < precipProb.length ? precipProb[i] : 0,
         });
       }
     }
@@ -113,14 +128,19 @@ class WeatherService {
       'lon': lon,
       'main': {
         'temp': current['temperature_2m'],
-        'temp_max': daily['temperature_2m_max'][0],
-        'temp_min': daily['temperature_2m_min'][0],
+        'temp_max': daily != null && daily['temperature_2m_max'] != null ? daily['temperature_2m_max'][0] : null,
+        'temp_min': daily != null && daily['temperature_2m_min'] != null ? daily['temperature_2m_min'][0] : null,
         'humidity': current['relative_humidity_2m'],
         'feels_like': current['apparent_temperature'],
-        'wind_speed': current['wind_speed_10m'],
+        'wind_speed': current['wind_speed_10m'] ?? 0,
+        'wind_dir': current['wind_direction_10m'] ?? 0,
+        'pressure': current['surface_pressure'] ?? 0,
+        'precipitation': current['precipitation'] ?? 0,
       },
       'weather_code': current['weather_code'],
       'aqi': aqi,
+      'pm25': pm25,
+      'primary_pollutant': primaryPollutant,
       'forecast': forecast,
     };
   }

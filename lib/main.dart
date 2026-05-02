@@ -5,9 +5,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:home_widget/home_widget.dart';
 import 'weather_service.dart';
 
-Future<void> _updateHomeWidget(String city, String temp) async {
+Future<void> _updateHomeWidget(String city, String temp, String desc, String icon) async {
   await HomeWidget.saveWidgetData('location', city);
   await HomeWidget.saveWidgetData('temp', '$temp°');
+  await HomeWidget.saveWidgetData('desc', desc);
   await HomeWidget.updateWidget(name: 'CloudyCuddlesWidget', androidName: 'CloudyCuddlesWidget');
 }
 
@@ -16,10 +17,11 @@ void main() {
 }
 
 class AppColors {
-  static const Color background = Color(0xFFE2F2FF);
-  static const Color darkBackground = Color(0xFF0F172A);
-  static const Color darkCardBg = Color(0xFF1E293B);
-  static const Color accentBlue = Color(0xFF90D0FF);
+  static const Color background = Color(0xFFF0F7FF);
+  static const Color darkBackground = Color(0xFF000000);
+  static const List<Color> dayGradient = [Color(0xFF29B6F6), Color(0xFF039BE5)];
+  static const List<Color> nightGradient = [Color(0xFF020617), Color(0xFF1E293B)];
+  static const Color accent = Color(0xFF0EA5E9);
 }
 
 class CloudyCuddlesApp extends StatefulWidget {
@@ -30,12 +32,7 @@ class CloudyCuddlesApp extends StatefulWidget {
 
 class _CloudyCuddlesAppState extends State<CloudyCuddlesApp> {
   ThemeMode _themeMode = ThemeMode.light;
-
-  void toggleTheme() {
-    setState(() {
-      _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
-    });
-  }
+  void toggleTheme() => setState(() => _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light);
 
   @override
   Widget build(BuildContext context) {
@@ -94,13 +91,9 @@ class _MainScaffoldState extends State<MainScaffold> {
         });
         _syncWidget();
       } else {
-        // Fallback: fetch by city name
         await _fetchWeather("Alwar");
       }
     } catch (e) {
-      print('Location Error: $e');
-      // Bug Fix: Ensure loading state is reset even on error
-      setState(() => _isLoading = false); 
       await _fetchWeather("Alwar");
     }
   }
@@ -113,11 +106,9 @@ class _MainScaffoldState extends State<MainScaffold> {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) return null;
     }
-    if (permission == LocationPermission.deniedForever) return null;
     return await Geolocator.getCurrentPosition();
   }
 
-  /// Fetch by lat/lon directly (used when user taps search result)
   Future<void> _fetchWeatherByCoords(double lat, double lon, String cityName) async {
     setState(() => _isLoading = true);
     try {
@@ -126,16 +117,14 @@ class _MainScaffoldState extends State<MainScaffold> {
         _weatherData = data;
         _currentLocation = cityName;
         _isLoading = false;
-        _currentIndex = 0; // Switch to home tab
+        _currentIndex = 0;
       });
       _syncWidget();
     } catch (e) {
-      print('Fetch Error: $e');
       setState(() => _isLoading = false);
     }
   }
 
-  /// Fetch by city name (geocodes internally)
   Future<void> _fetchWeather(String city) async {
     setState(() => _isLoading = true);
     try {
@@ -148,7 +137,6 @@ class _MainScaffoldState extends State<MainScaffold> {
       });
       _syncWidget();
     } catch (e) {
-      print('Weather Fetch Error: $e');
       setState(() => _isLoading = false);
     }
   }
@@ -156,7 +144,8 @@ class _MainScaffoldState extends State<MainScaffold> {
   void _syncWidget() {
     if (_weatherData != null) {
       final temp = (_weatherData!['main']?['temp'] ?? 0).toStringAsFixed(0);
-      _updateHomeWidget(_currentLocation, temp);
+      final info = WeatherService.weatherCodeToInfo(_weatherData!['weather_code'] ?? 0);
+      _updateHomeWidget(_currentLocation, temp, info['desc'], info['icon']);
     }
   }
 
@@ -164,34 +153,95 @@ class _MainScaffoldState extends State<MainScaffold> {
   Widget build(BuildContext context) {
     bool isDark = widget.themeMode == ThemeMode.dark;
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
+      extendBody: true,
+      body: Stack(
         children: [
-          _isLoading 
-            ? const Center(child: CircularProgressIndicator())
-            : _weatherData == null
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.cloud_off, size: 64, color: Colors.grey),
-                        const SizedBox(height: 16),
-                        const Text("Couldn't load weather data.", style: TextStyle(color: Colors.grey, fontSize: 16)),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: _handleLocationAndFetch, 
-                          icon: const Icon(Icons.refresh), 
-                          label: const Text("Retry")
-                        )
-                      ],
-                    ),
-                  )
-                : WeatherDashboard(data: _weatherData!, onSearch: _showSearch, onLocate: _handleLocationAndFetch),
-          WidgetGalleryPage(weatherData: _weatherData),
-          SettingsPage(onToggleTheme: widget.onToggleTheme, isDark: isDark),
+          // Dynamic Background
+          AnimatedContainer(
+            duration: const Duration(seconds: 1),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: isDark ? AppColors.nightGradient : AppColors.dayGradient,
+              ),
+            ),
+          ),
+          
+          SafeArea(
+            child: IndexedStack(
+              index: _currentIndex,
+              children: [
+                _isLoading 
+                  ? const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : _weatherData == null
+                      ? _buildErrorUI()
+                      : WeatherDashboard(data: _weatherData!, onSearch: _showSearch, onLocate: _handleLocationAndFetch),
+                WidgetGalleryPage(weatherData: _weatherData),
+                SettingsPage(onToggleTheme: widget.onToggleTheme, isDark: isDark),
+              ],
+            ),
+          ),
         ],
       ),
-      bottomNavigationBar: _buildBottomNav(isDark),
+      bottomNavigationBar: _buildiOSNav(isDark),
+    );
+  }
+
+  Widget _buildErrorUI() {
+    return Center(
+      child: GlassCard(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off, size: 64, color: Colors.white70),
+            const SizedBox(height: 16),
+            const Text("Connection Lost", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 24),
+            TextButton(onPressed: _handleLocationAndFetch, child: const Text("Try Again", style: TextStyle(color: Colors.white))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildiOSNav(bool isDark) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(40, 0, 40, 30),
+      height: 64,
+      decoration: BoxDecoration(
+        color: isDark ? Colors.black.withOpacity(0.5) : Colors.white.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _navItem(0, Icons.wb_sunny_rounded, isDark),
+              _navItem(1, Icons.grid_view_rounded, isDark),
+              _navItem(2, Icons.more_horiz_rounded, isDark),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem(int index, IconData icon, bool isDark) {
+    bool active = _currentIndex == index;
+    return GestureDetector(
+      onTap: () => setState(() => _currentIndex = index),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 60,
+        alignment: Alignment.center,
+        child: Icon(icon, color: active ? Colors.white : Colors.white.withOpacity(0.4), size: 26),
+      ),
     );
   }
 
@@ -204,59 +254,48 @@ class _MainScaffoldState extends State<MainScaffold> {
       backgroundColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) => Container(
-          height: MediaQuery.of(context).size.height * 0.8,
-          decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
-          padding: const EdgeInsets.all(24),
+          height: MediaQuery.of(context).size.height * 0.9,
+          decoration: BoxDecoration(
+            color: widget.themeMode == ThemeMode.dark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
           child: Column(children: [
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 24),
-            TextField(
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: "Search city...", 
-                prefixIcon: const Icon(Icons.search), 
-                suffixIcon: isSearching ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))) : null,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-              onChanged: (value) async {
-                if (value.isNotEmpty) {
-                  setSheetState(() => isSearching = true);
-                  try {
-                    final results = await _weatherService.searchCities(value);
-                    setSheetState(() {
-                      suggestions = results;
-                      isSearching = false;
-                    });
-                  } catch (e) {
-                    setSheetState(() => isSearching = false);
+            const SizedBox(height: 12),
+            Container(width: 36, height: 5, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.5), borderRadius: BorderRadius.circular(2.5))),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: TextField(
+                autofocus: true,
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.grey.withOpacity(0.1),
+                  hintText: "Search for a city",
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                onChanged: (v) async {
+                  if (v.length > 1) {
+                    setSheetState(() => isSearching = true);
+                    final r = await _weatherService.searchCities(v);
+                    setSheetState(() { suggestions = r; isSearching = false; });
                   }
-                } else {
-                  setSheetState(() => suggestions = []);
-                }
-              },
+                },
+              ),
             ),
-            const SizedBox(height: 16),
             Expanded(
-              child: suggestions.isEmpty && !isSearching
-                ? const Center(child: Text("Start typing to search cities...", style: TextStyle(color: Colors.grey)))
-                : ListView.builder(
+              child: isSearching 
+                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                : ListView.separated(
                     itemCount: suggestions.length,
-                    itemBuilder: (context, index) {
-                      final city = suggestions[index];
-                      return ListTile(
-                        leading: const Icon(Icons.location_city, color: Colors.lightBlue),
-                        title: Text(city['full_name'] ?? city['name']),
-                        onTap: () {
-                          Navigator.pop(context);
-                          // Use lat/lon directly — no re-geocoding!
-                          _fetchWeatherByCoords(
-                            city['lat'],
-                            city['lon'],
-                            city['name'],
-                          );
-                        },
-                      );
-                    },
+                    separatorBuilder: (c, i) => const Divider(indent: 16, endIndent: 16, height: 1),
+                    itemBuilder: (c, i) => ListTile(
+                      title: Text(suggestions[i]['full_name']),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _fetchWeatherByCoords(suggestions[i]['lat'], suggestions[i]['lon'], suggestions[i]['name']);
+                      },
+                    ),
                   ),
             ),
           ]),
@@ -264,39 +303,37 @@ class _MainScaffoldState extends State<MainScaffold> {
       ),
     );
   }
+}
 
-  Widget _buildBottomNav(bool isDark) {
+class GlassCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets? padding;
+  final EdgeInsets? margin;
+  const GlassCard({super.key, required this.child, this.padding, this.margin});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      height: 90,
-      decoration: BoxDecoration(color: isDark ? AppColors.darkCardBg : Colors.white, borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-        _navItem(0, Icons.home_rounded, 'Home'),
-        _navItem(1, Icons.grid_view_rounded, 'Widgets'),
-        _navItem(2, Icons.settings_rounded, 'Settings'),
-      ]),
-    );
-  }
-
-  Widget _navItem(int index, IconData icon, String label) {
-    bool isActive = _currentIndex == index;
-    return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-          decoration: BoxDecoration(color: isActive ? Colors.lightBlue.withOpacity(0.1) : Colors.transparent, borderRadius: BorderRadius.circular(20)),
-          child: Icon(icon, color: isActive ? Colors.lightBlue : Colors.grey[400]),
+      margin: margin ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: padding ?? const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
+            ),
+            child: child,
+          ),
         ),
-        const SizedBox(height: 4),
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: isActive ? FontWeight.bold : FontWeight.normal, color: isActive ? (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black) : Colors.grey)),
-      ]),
+      ),
     );
   }
 }
 
-// ─────────────────────────────────────────────
-// WEATHER DASHBOARD — real data everywhere
-// ─────────────────────────────────────────────
 class WeatherDashboard extends StatelessWidget {
   final Map<String, dynamic> data;
   final VoidCallback onSearch;
@@ -305,266 +342,256 @@ class WeatherDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final city = data['name'] ?? 'Unknown';
+    final info = WeatherService.weatherCodeToInfo(data['weather_code'] ?? 0);
     final temp = (data['main']?['temp'] ?? 0).toStringAsFixed(0);
-    final high = (data['main']?['temp_max'] ?? 0).toStringAsFixed(0);
-    final low = (data['main']?['temp_min'] ?? 0).toStringAsFixed(0);
-    final humidity = data['main']?['humidity'] ?? 0;
-    final feelsLike = (data['main']?['feels_like'] ?? 0).toStringAsFixed(0);
-    final windSpeed = (data['main']?['wind_speed'] ?? 0).toStringAsFixed(1);
-    final weatherCode = data['weather_code'] ?? 0;
-    final weatherInfo = WeatherService.weatherCodeToInfo(weatherCode);
+    final hi = (data['main']?['temp_max'] ?? 0).toStringAsFixed(0);
+    final lo = (data['main']?['temp_min'] ?? 0).toStringAsFixed(0);
     final aqi = data['aqi'] ?? 0;
     final aqiLabel = WeatherService.aqiLabel(aqi);
-    final aqiColor = Color(WeatherService.aqiColorValue(aqi));
-    final forecast = data['forecast'] as List<dynamic>? ?? [];
-    bool isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return SafeArea(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20.0), child: Column(children: [
-      // Header
-      Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        IconButton(icon: const Icon(Icons.location_on_outlined, color: Colors.lightBlue), onPressed: onLocate),
-        Text('Cloudy Cuddles', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.lightBlue)),
-        IconButton(icon: const Icon(Icons.search, color: Colors.lightBlue), onPressed: onSearch),
-      ])),
-
-      Expanded(child: SingleChildScrollView(child: Column(children: [
-        // Main weather card
-        Container(
-          width: double.infinity,
-          decoration: BoxDecoration(color: isDark ? AppColors.darkCardBg : Colors.white, borderRadius: BorderRadius.circular(40)),
-          padding: const EdgeInsets.all(32),
-          child: Column(children: [
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(city, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              const SizedBox(width: 4),
-              const Icon(Icons.near_me_outlined, size: 20),
+    return CustomScrollView(
+      physics: const BouncingScrollPhysics(),
+      slivers: [
+        SliverToBoxAdapter(
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                IconButton(icon: const Icon(Icons.location_searching, color: Colors.white, size: 20), onPressed: onLocate),
+                Text(data['name'] ?? 'Alwar', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w400)),
+                IconButton(icon: const Icon(Icons.list, color: Colors.white, size: 28), onPressed: onSearch),
+              ]),
+              const SizedBox(height: 40),
+              Text('$temp°', style: const TextStyle(color: Colors.white, fontSize: 100, fontWeight: FontWeight.w200)),
+              Text(info['desc'], style: const TextStyle(color: Colors.white70, fontSize: 20, fontWeight: FontWeight.w500)),
+              Text("H:$hi°  L:$lo°", style: const TextStyle(color: Colors.white60, fontSize: 18, fontWeight: FontWeight.w400)),
+              const SizedBox(height: 60),
+            ],
+          ),
+        ),
+        
+        // AQI List Item
+        SliverToBoxAdapter(
+          child: GlassCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(children: [
+              const Icon(Icons.air, color: Colors.white70, size: 20),
+              const SizedBox(width: 12),
+              Expanded(child: Text("AIR QUALITY", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2))),
+              Text("$aqi - $aqiLabel", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
             ]),
-            const SizedBox(height: 16),
-            // Weather icon
-            Text(weatherInfo['icon'], style: const TextStyle(fontSize: 80)),
-            const SizedBox(height: 8),
-            Text(weatherInfo['desc'], style: TextStyle(fontSize: 16, color: Colors.grey[600])),
-            const SizedBox(height: 12),
-            Text('$temp°', style: const TextStyle(fontSize: 96, fontWeight: FontWeight.w800, letterSpacing: -4)),
-            Text('Feels like $feelsLike°', style: TextStyle(fontSize: 14, color: Colors.grey[500])),
-            const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              // AQI chip with real color
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(color: aqiColor.withOpacity(isDark ? 0.3 : 0.2), borderRadius: BorderRadius.circular(20)),
-                child: Text('AQI $aqi · $aqiLabel', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: aqiColor)),
-              ),
-              const SizedBox(width: 16),
-              Text('H:$high° L:$low°'),
-            ]),
-          ]),
+          ),
         ),
 
-        const SizedBox(height: 16),
-
-        // Stats row: Humidity, Wind, Feels Like
-        Row(children: [
-          Expanded(child: _statCard('💧', 'Humidity', '$humidity%', isDark)),
-          const SizedBox(width: 12),
-          Expanded(child: _statCard('💨', 'Wind', '$windSpeed km/h', isDark)),
-          const SizedBox(width: 12),
-          Expanded(child: _statCard('🌡️', 'Feels', '$feelsLike°', isDark)),
-        ]),
-
-        const SizedBox(height: 16),
-
         // 7-Day Forecast
-        _buildForecast(forecast, isDark),
+        SliverToBoxAdapter(
+          child: GlassCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(Icons.calendar_month, color: Colors.white.withOpacity(0.5), size: 16),
+                const SizedBox(width: 8),
+                Text("10-DAY FORECAST", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              ]),
+              const SizedBox(height: 16),
+              ...(data['forecast'] as List).map((f) => _forecastRow(f)),
+            ]),
+          ),
+        ),
 
-        const SizedBox(height: 20),
-      ]))),
-    ])));
+        // Grid details
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          sliver: SliverGrid.count(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.2,
+            children: [
+              _gridItem("HUMIDITY", "${data['main']?['humidity']}%", Icons.water_drop),
+              _gridItem("WIND", "${data['main']?['wind_speed']} km/h", Icons.wind_power),
+              _gridItem("FEELS LIKE", "${data['main']?['feels_like']}°", Icons.thermostat),
+              _gridItem("VISIBILITY", "10 km", Icons.visibility),
+            ],
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
+      ],
+    );
   }
 
-  Widget _statCard(String emoji, String label, String value, bool isDark) {
-    return Container(
+  Widget _gridItem(String label, String value, IconData icon) {
+    return GlassCard(
+      margin: EdgeInsets.zero,
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkCardBg : Colors.white,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(children: [
-        Text(emoji, style: const TextStyle(fontSize: 24)),
-        const SizedBox(height: 8),
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Icon(icon, color: Colors.white.withOpacity(0.5), size: 14), const SizedBox(width: 6), Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10, fontWeight: FontWeight.bold))]),
+        const Spacer(),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w400)),
+        const Spacer(),
       ]),
     );
   }
 
-  Widget _buildForecast(List<dynamic> forecast, bool isDark) {
-    if (forecast.isEmpty) return const SizedBox.shrink();
-
-    final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
+  Widget _forecastRow(dynamic f) {
+    final date = DateTime.parse(f['date']);
+    final day = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][date.weekday - 1];
+    final isToday = DateTime.now().day == date.day;
+    final info = WeatherService.weatherCodeToInfo(f['weather_code']);
     return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(color: isDark ? AppColors.darkCardBg : Colors.white, borderRadius: BorderRadius.circular(32)),
-      padding: const EdgeInsets.all(24),
-      child: Column(children: [
-        const Row(children: [
-          Icon(Icons.calendar_today_outlined, size: 18),
-          SizedBox(width: 8),
-          Text('7-Day Forecast', style: TextStyle(fontWeight: FontWeight.bold)),
-        ]),
-        const SizedBox(height: 20),
-        ...forecast.map((day) {
-          final date = DateTime.tryParse(day['date'] ?? '');
-          final dayName = date != null ? days[date.weekday - 1] : '??';
-          final isToday = date != null && date.day == DateTime.now().day && date.month == DateTime.now().month;
-          final code = day['weather_code'] ?? 0;
-          final info = WeatherService.weatherCodeToInfo(code);
-          final hi = (day['temp_max'] ?? 0).toStringAsFixed(0);
-          final lo = (day['temp_min'] ?? 0).toStringAsFixed(0);
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(children: [
-              SizedBox(width: 50, child: Text(isToday ? 'Today' : dayName, style: TextStyle(fontWeight: isToday ? FontWeight.bold : FontWeight.normal, color: isToday ? Colors.lightBlue : null))),
-              Text(info['icon'], style: const TextStyle(fontSize: 20)),
-              const SizedBox(width: 8),
-              Expanded(child: Text(info['desc'], style: TextStyle(fontSize: 13, color: Colors.grey[500]))),
-              Text('$hi°', style: const TextStyle(fontWeight: FontWeight.bold)),
-              Text(' / $lo°', style: TextStyle(color: Colors.grey[400])),
-            ]),
-          );
-        }),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.white.withOpacity(0.05)))),
+      child: Row(children: [
+        SizedBox(width: 45, child: Text(isToday ? "Today" : day, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500))),
+        const Spacer(),
+        Text(info['icon'], style: const TextStyle(fontSize: 22)),
+        const Spacer(),
+        SizedBox(width: 35, child: Text("${f['temp_min']}°", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 16, fontWeight: FontWeight.w500))),
+        const SizedBox(width: 10),
+        // Temperature Bar Mock
+        Container(width: 60, height: 4, decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(2))),
+        const SizedBox(width: 10),
+        SizedBox(width: 35, child: Text("${f['temp_max']}°", style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500))),
       ]),
     );
   }
 }
 
 // ─────────────────────────────────────────────
-// WIDGET GALLERY PAGE
+// PREMIUM IOS WIDGETS
 // ─────────────────────────────────────────────
 class WidgetGalleryPage extends StatelessWidget {
   final Map<String, dynamic>? weatherData;
   const WidgetGalleryPage({super.key, this.weatherData});
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(title: const Text("Widget Gallery"), backgroundColor: Colors.transparent),
-      body: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          const Text("Long press your phone's home screen to add these widgets!", style: TextStyle(fontSize: 14, color: Colors.grey)),
-          const SizedBox(height: 32),
-          const Text("SMALL (2X2)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.lightBlue)),
-          const SizedBox(height: 12),
-          Center(child: SmallWidget(data: weatherData)),
-          const SizedBox(height: 40),
-          const Text("MEDIUM (2X4)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.lightBlue)),
-          const SizedBox(height: 12),
-          MediumWidget(data: weatherData),
-          const SizedBox(height: 40),
-        ],
-      ),
-    );
-  }
-}
-
-class SmallWidget extends StatelessWidget {
-  final Map<String, dynamic>? data;
-  const SmallWidget({super.key, this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final temp = (data?['main']?['temp'] ?? 0).toStringAsFixed(0);
-    final code = data?['weather_code'] ?? 0;
-    final info = WeatherService.weatherCodeToInfo(code);
-
-    return Container(
-      width: 170, height: 180,
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkCardBg : Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(info['icon'], style: const TextStyle(fontSize: 40)),
-          Text('$temp°', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
-          Text(info['desc'], style: const TextStyle(fontSize: 14, color: Colors.lightBlue)),
-        ],
-      ),
-    );
-  }
-}
-
-class MediumWidget extends StatelessWidget {
-  final Map<String, dynamic>? data;
-  const MediumWidget({super.key, this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final city = data?['name'] ?? 'Loading...';
-    final temp = (data?['main']?['temp'] ?? 0).toStringAsFixed(0);
-    final aqi = data?['aqi'] ?? 0;
-    final aqiLabel = WeatherService.aqiLabel(aqi);
-    final aqiColor = Color(WeatherService.aqiColorValue(aqi));
-    final high = (data?['main']?['temp_max'] ?? 0).toStringAsFixed(0);
-    final low = (data?['main']?['temp_min'] ?? 0).toStringAsFixed(0);
-    final code = data?['weather_code'] ?? 0;
-    final info = WeatherService.weatherCodeToInfo(code);
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkCardBg : Colors.white,
-        borderRadius: BorderRadius.circular(32),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)],
-      ),
-      child: Column(children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(city, style: const TextStyle(fontSize: 16, color: Colors.grey)),
-            Text('$temp°', style: const TextStyle(fontSize: 54, fontWeight: FontWeight.bold)),
-          ]),
-          Text(info['icon'], style: const TextStyle(fontSize: 48)),
-        ]),
-        const Divider(),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(color: aqiColor.withOpacity(isDark ? 0.3 : 0.2), borderRadius: BorderRadius.circular(20)),
-              child: Text('AQI $aqi', style: TextStyle(color: aqiColor, fontWeight: FontWeight.bold, fontSize: 12), overflow: TextOverflow.ellipsis),
-            ),
+      body: CustomScrollView(
+        slivers: [
+          const SliverAppBar(
+            title: Text("Smart Stack", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+            backgroundColor: Colors.transparent,
+            floating: true,
           ),
-          const SizedBox(width: 8),
-          Text('H:$high° L:$low°', style: const TextStyle(fontSize: 14)),
-        ]),
+          SliverPadding(
+            padding: const EdgeInsets.all(24),
+            child: SliverList(delegate: SliverChildListDelegate([
+              _iosWidgetFrame("Small Weather", "2x2", iOSSmallWidget(data: weatherData)),
+              const SizedBox(height: 40),
+              _iosWidgetFrame("Medium Forecast", "4x2", iOSMediumWidget(data: weatherData)),
+            ])),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _iosWidgetFrame(String name, String size, Widget child) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+        Text(size, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14)),
+      ]),
+      const SizedBox(height: 16),
+      child,
+    ]);
+  }
+}
+
+class iOSSmallWidget extends StatelessWidget {
+  final Map<String, dynamic>? data;
+  const iOSSmallWidget({super.key, this.data});
+  @override
+  Widget build(BuildContext context) {
+    final info = WeatherService.weatherCodeToInfo(data?['weather_code'] ?? 0);
+    return Container(
+      width: 155, height: 155,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFF5AC8FA), Color(0xFF007AFF)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 5))],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(data?['name'] ?? 'Alwar', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        Text("${data?['main']?['temp']?.toStringAsFixed(0) ?? '--'}°", style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w300)),
+        const Spacer(),
+        Text(info['icon'], style: const TextStyle(fontSize: 32)),
+        Text(info['desc'], style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+        Text("H:${data?['main']?['temp_max']?.toStringAsFixed(0)}° L:${data?['main']?['temp_min']?.toStringAsFixed(0)}°", style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 10)),
       ]),
     );
   }
 }
 
-// ─────────────────────────────────────────────
-// SETTINGS PAGE
-// ─────────────────────────────────────────────
+class iOSMediumWidget extends StatelessWidget {
+  final Map<String, dynamic>? data;
+  const iOSMediumWidget({super.key, this.data});
+  @override
+  Widget build(BuildContext context) {
+    final info = WeatherService.weatherCodeToInfo(data?['weather_code'] ?? 0);
+    return Container(
+      width: double.infinity, height: 155,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Row(children: [
+        Expanded(
+          flex: 2,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(data?['name'] ?? 'Alwar', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            Text("${data?['main']?['temp']?.toStringAsFixed(0) ?? '--'}°", style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.w200)),
+            const Spacer(),
+            Text(info['desc'], style: const TextStyle(color: Colors.white60, fontSize: 14)),
+            Text("AQI: ${data?['aqi'] ?? '--'}", style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          ]),
+        ),
+        Expanded(
+          flex: 3,
+          child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: 
+            (data?['forecast'] as List? ?? []).take(4).map((f) {
+              final d = DateTime.parse(f['date']);
+              final day = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d.weekday - 1];
+              return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text(day, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(WeatherService.weatherCodeToInfo(f['weather_code'])['icon'], style: const TextStyle(fontSize: 16)),
+                Text("${f['temp_max']}°", style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+              ]);
+            }).toList()
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
 class SettingsPage extends StatelessWidget {
   final VoidCallback onToggleTheme;
   final bool isDark;
   const SettingsPage({super.key, required this.onToggleTheme, required this.isDark});
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text("Settings"), backgroundColor: Colors.transparent),
-    body: ListView(children: [
-      SwitchListTile(title: const Text("Dark Mode"), subtitle: const Text("Switch between light and dark themes"), value: isDark, onChanged: (v) => onToggleTheme()),
-      const ListTile(title: Text("About Cloudy Cuddles"), subtitle: Text("Version 1.0.0")),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(24),
+    child: GlassCard(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text("Preferences", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 20),
+        _iosSettingItem("Dark Mode", Switch(value: isDark, onChanged: (v) => onToggleTheme(), activeColor: AppColors.accent)),
+        _iosSettingItem("Units", const Text("Celsius", style: TextStyle(color: Colors.white38))),
+        _iosSettingItem("Notifications", const Text("On", style: TextStyle(color: Colors.white38))),
+      ]),
+    ),
+  );
+
+  Widget _iosSettingItem(String label, Widget trailing) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.white.withOpacity(0.05)))),
+    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      Text(label, style: const TextStyle(color: Colors.white, fontSize: 16)),
+      trailing,
     ]),
   );
 }
