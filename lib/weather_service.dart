@@ -6,8 +6,9 @@ class WeatherService {
 
   Future<Map<String, dynamic>> getWeather(String cityName) async {
     // 1. Get coordinates for the city name
+    final encodedCity = Uri.encodeComponent(cityName);
     final geoResponse = await http.get(
-      Uri.parse('https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=1&language=en&format=json'),
+      Uri.parse('https://geocoding-api.open-meteo.com/v1/search?name=$encodedCity&count=1&language=en&format=json'),
     );
 
     if (geoResponse.statusCode == 200) {
@@ -59,8 +60,9 @@ class WeatherService {
     if (query.isEmpty) return [];
     
     // Using Teleport API for the instant search bar
+    final encodedQuery = Uri.encodeComponent(query);
     final response = await http.get(
-      Uri.parse('https://api.teleport.org/api/cities/?search=$query'),
+      Uri.parse('https://api.teleport.org/api/cities/?search=$encodedQuery'),
     );
 
     if (response.statusCode == 200) {
