@@ -49,7 +49,7 @@ class WeatherService {
   }
 
   Future<List<dynamic>> searchCities(String query) async {
-    if (query.length < 3) return [];
+    if (query.isEmpty) return [];
     
     // Using Teleport API for a more comprehensive city search
     final response = await http.get(

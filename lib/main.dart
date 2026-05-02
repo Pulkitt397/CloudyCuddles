@@ -151,7 +151,24 @@ class _MainScaffoldState extends State<MainScaffold> {
         children: [
           _isLoading 
             ? const Center(child: CircularProgressIndicator())
-            : WeatherDashboard(data: _weatherData!, onSearch: _showSearch, onLocate: _handleLocationAndFetch),
+            : _weatherData == null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.cloud_off, size: 64, color: Colors.grey),
+                        const SizedBox(height: 16),
+                        const Text("Oops! Couldn't load weather data.", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          onPressed: _handleLocationAndFetch, 
+                          icon: const Icon(Icons.refresh), 
+                          label: const Text("Retry")
+                        )
+                      ],
+                    ),
+                  )
+                : WeatherDashboard(data: _weatherData!, onSearch: _showSearch, onLocate: _handleLocationAndFetch),
           WidgetGalleryPage(weatherData: _weatherData),
           SettingsPage(onToggleTheme: widget.onToggleTheme, isDark: isDark),
         ],
@@ -184,7 +201,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
               ),
               onChanged: (value) async {
-                if (value.length >= 3) {
+                if (value.isNotEmpty) {
                   setSheetState(() => isSearching = true);
                   try {
                     final results = await _weatherService.searchCities(value);
@@ -203,7 +220,7 @@ class _MainScaffoldState extends State<MainScaffold> {
             const SizedBox(height: 16),
             Expanded(
               child: suggestions.isEmpty && !isSearching
-                ? const Center(child: Text("Type 3 characters to search...", style: TextStyle(color: Colors.grey)))
+                ? const Center(child: Text("Start typing to search cities...", style: TextStyle(color: Colors.grey)))
                 : ListView.builder(
                     itemCount: suggestions.length,
                     itemBuilder: (context, index) {
