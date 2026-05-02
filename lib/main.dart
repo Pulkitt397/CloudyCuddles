@@ -5,12 +5,11 @@ import 'package:geolocator/geolocator.dart';
 import 'package:home_widget/home_widget.dart';
 import 'weather_service.dart';
 
-// ... (in the State class)
-  Future<void> _updateHomeWidget(String city, String temp) async {
-    await HomeWidget.saveWidgetData('location', city);
-    await HomeWidget.saveWidgetData('temp', '$temp°');
-    await HomeWidget.updateWidget(name: 'CloudyCuddlesWidget', androidName: 'CloudyCuddlesWidget');
-  }
+Future<void> _updateHomeWidget(String city, String temp) async {
+  await HomeWidget.saveWidgetData('location', city);
+  await HomeWidget.saveWidgetData('temp', '$temp°');
+  await HomeWidget.updateWidget(name: 'CloudyCuddlesWidget', androidName: 'CloudyCuddlesWidget');
+}
 
 void main() {
   runApp(const CloudyCuddlesApp());
@@ -25,7 +24,6 @@ class AppColors {
 
 class CloudyCuddlesApp extends StatefulWidget {
   const CloudyCuddlesApp({super.key});
-
   @override
   State<CloudyCuddlesApp> createState() => _CloudyCuddlesAppState();
 }
@@ -66,14 +64,13 @@ class MainScaffold extends StatefulWidget {
   final VoidCallback onToggleTheme;
   final ThemeMode themeMode;
   const MainScaffold({super.key, required this.onToggleTheme, required this.themeMode});
-
   @override
   State<MainScaffold> createState() => _MainScaffoldState();
 }
 
 class _MainScaffoldState extends State<MainScaffold> {
   int _currentIndex = 0;
-  String _currentLocation = "Alwar, Rajasthan";
+  String _currentLocation = "Loading...";
   Map<String, dynamic>? _weatherData;
   bool _isLoading = true;
   final WeatherService _weatherService = WeatherService();
@@ -95,11 +92,14 @@ class _MainScaffoldState extends State<MainScaffold> {
           _currentLocation = data['name'];
           _isLoading = false;
         });
+        _syncWidget();
       } else {
-        _fetchWeather(_currentLocation);
+        // Fallback: fetch by city name
+        await _fetchWeather("Alwar");
       }
     } catch (e) {
-      _fetchWeather(_currentLocation);
+      print('Location Error: $e');
+      await _fetchWeather("Alwar");
     }
   }
 
@@ -115,31 +115,46 @@ class _MainScaffoldState extends State<MainScaffold> {
     return await Geolocator.getCurrentPosition();
   }
 
-  Future<void> _fetchWeatherByCoords(double lat, double lon) async {
-    final data = await _weatherService.getWeatherByCoords(lat, lon);
-    final temp = (data['main']?['temp'] ?? 0).toStringAsFixed(0);
-    setState(() {
-      _weatherData = data;
-      _currentLocation = data['name'];
-      _isLoading = false;
-    });
-    _updateHomeWidget(_currentLocation, temp);
+  /// Fetch by lat/lon directly (used when user taps search result)
+  Future<void> _fetchWeatherByCoords(double lat, double lon, String cityName) async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await _weatherService.fetchFullWeather(lat, lon, cityName);
+      setState(() {
+        _weatherData = data;
+        _currentLocation = cityName;
+        _isLoading = false;
+        _currentIndex = 0; // Switch to home tab
+      });
+      _syncWidget();
+    } catch (e) {
+      print('Fetch Error: $e');
+      setState(() => _isLoading = false);
+    }
   }
 
+  /// Fetch by city name (geocodes internally)
   Future<void> _fetchWeather(String city) async {
     setState(() => _isLoading = true);
     try {
       final data = await _weatherService.getWeather(city);
-      final temp = (data['main']?['temp'] ?? 0).toStringAsFixed(0);
       setState(() {
         _weatherData = data;
-        _currentLocation = city;
+        _currentLocation = data['name'] ?? city;
         _isLoading = false;
+        _currentIndex = 0;
       });
-      _updateHomeWidget(city, temp);
+      _syncWidget();
     } catch (e) {
       print('Weather Fetch Error: $e');
       setState(() => _isLoading = false);
+    }
+  }
+
+  void _syncWidget() {
+    if (_weatherData != null) {
+      final temp = (_weatherData!['main']?['temp'] ?? 0).toStringAsFixed(0);
+      _updateHomeWidget(_currentLocation, temp);
     }
   }
 
@@ -159,7 +174,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                       children: [
                         const Icon(Icons.cloud_off, size: 64, color: Colors.grey),
                         const SizedBox(height: 16),
-                        const Text("Oops! Couldn't load weather data.", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                        const Text("Couldn't load weather data.", style: TextStyle(color: Colors.grey, fontSize: 16)),
                         const SizedBox(height: 16),
                         ElevatedButton.icon(
                           onPressed: _handleLocationAndFetch, 
@@ -230,8 +245,13 @@ class _MainScaffoldState extends State<MainScaffold> {
                         leading: const Icon(Icons.location_city, color: Colors.lightBlue),
                         title: Text(city['full_name'] ?? city['name']),
                         onTap: () {
-                          _fetchWeather(city['name']);
                           Navigator.pop(context);
+                          // Use lat/lon directly — no re-geocoding!
+                          _fetchWeatherByCoords(
+                            city['lat'],
+                            city['lon'],
+                            city['name'],
+                          );
                         },
                       );
                     },
@@ -272,6 +292,9 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 }
 
+// ─────────────────────────────────────────────
+// WEATHER DASHBOARD — real data everywhere
+// ─────────────────────────────────────────────
 class WeatherDashboard extends StatelessWidget {
   final Map<String, dynamic> data;
   final VoidCallback onSearch;
@@ -284,60 +307,147 @@ class WeatherDashboard extends StatelessWidget {
     final temp = (data['main']?['temp'] ?? 0).toStringAsFixed(0);
     final high = (data['main']?['temp_max'] ?? 0).toStringAsFixed(0);
     final low = (data['main']?['temp_min'] ?? 0).toStringAsFixed(0);
+    final humidity = data['main']?['humidity'] ?? 0;
+    final feelsLike = (data['main']?['feels_like'] ?? 0).toStringAsFixed(0);
+    final windSpeed = (data['main']?['wind_speed'] ?? 0).toStringAsFixed(1);
+    final weatherCode = data['weather_code'] ?? 0;
+    final weatherInfo = WeatherService.weatherCodeToInfo(weatherCode);
+    final aqi = data['aqi'] ?? 0;
+    final aqiLabel = WeatherService.aqiLabel(aqi);
+    final aqiColor = Color(WeatherService.aqiColorValue(aqi));
+    final forecast = data['forecast'] as List<dynamic>? ?? [];
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
     return SafeArea(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20.0), child: Column(children: [
+      // Header
       Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         IconButton(icon: const Icon(Icons.location_on_outlined, color: Colors.lightBlue), onPressed: onLocate),
         Text('Cloudy Cuddles', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.lightBlue)),
         IconButton(icon: const Icon(Icons.search, color: Colors.lightBlue), onPressed: onSearch),
       ])),
+
       Expanded(child: SingleChildScrollView(child: Column(children: [
+        // Main weather card
         Container(
-          width: double.infinity, decoration: BoxDecoration(color: isDark ? AppColors.darkCardBg : Colors.white, borderRadius: BorderRadius.circular(40)),
-          padding: const EdgeInsets.all(32), child: Column(children: [
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text(city, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), const Icon(Icons.near_me_outlined, size: 20)]),
-            const SizedBox(height: 30),
-            Container(width: 180, height: 180, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [Colors.blue.withOpacity(0.2), Colors.transparent])), child: const Center(child: Icon(Icons.cloud, size: 100, color: Colors.blueGrey))),
-            const SizedBox(height: 20),
-            Text('$temp°', style: const TextStyle(fontSize: 96, fontWeight: FontWeight.w800, letterSpacing: -4)),
-            const SizedBox(height: 10),
+          width: double.infinity,
+          decoration: BoxDecoration(color: isDark ? AppColors.darkCardBg : Colors.white, borderRadius: BorderRadius.circular(40)),
+          padding: const EdgeInsets.all(32),
+          child: Column(children: [
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(color: Colors.lightBlue[100]!.withOpacity(isDark ? 0.2 : 1), borderRadius: BorderRadius.circular(20)), child: const Text('AQI: 42', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-              const SizedBox(width: 16), Text('H:$high° L:$low°'),
+              Text(city, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 4),
+              const Icon(Icons.near_me_outlined, size: 20),
+            ]),
+            const SizedBox(height: 16),
+            // Weather icon
+            Text(weatherInfo['icon'], style: const TextStyle(fontSize: 80)),
+            const SizedBox(height: 8),
+            Text(weatherInfo['desc'], style: TextStyle(fontSize: 16, color: Colors.grey[600])),
+            const SizedBox(height: 12),
+            Text('$temp°', style: const TextStyle(fontSize: 96, fontWeight: FontWeight.w800, letterSpacing: -4)),
+            Text('Feels like $feelsLike°', style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              // AQI chip with real color
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(color: aqiColor.withOpacity(isDark ? 0.3 : 0.2), borderRadius: BorderRadius.circular(20)),
+                child: Text('AQI $aqi · $aqiLabel', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: aqiColor)),
+              ),
+              const SizedBox(width: 16),
+              Text('H:$high° L:$low°'),
             ]),
           ]),
         ),
+
+        const SizedBox(height: 16),
+
+        // Stats row: Humidity, Wind, Feels Like
+        Row(children: [
+          Expanded(child: _statCard('💧', 'Humidity', '$humidity%', isDark)),
+          const SizedBox(width: 12),
+          Expanded(child: _statCard('💨', 'Wind', '$windSpeed km/h', isDark)),
+          const SizedBox(width: 12),
+          Expanded(child: _statCard('🌡️', 'Feels', '$feelsLike°', isDark)),
+        ]),
+
+        const SizedBox(height: 16),
+
+        // 7-Day Forecast
+        _buildForecast(forecast, isDark),
+
         const SizedBox(height: 20),
-        _buildWeeklyOutlook(isDark),
       ]))),
     ])));
   }
 
-  Widget _buildWeeklyOutlook(bool isDark) {
+  Widget _statCard(String emoji, String label, String value, bool isDark) {
     return Container(
-      width: double.infinity, decoration: BoxDecoration(color: isDark ? AppColors.darkCardBg : Colors.white, borderRadius: BorderRadius.circular(32)),
-      padding: const EdgeInsets.all(24), child: Column(children: [
-        const Row(children: [Icon(Icons.calendar_today_outlined, size: 18), SizedBox(width: 8), Text('Weekly Outlook', style: TextStyle(fontWeight: FontWeight.bold))]),
-        const SizedBox(height: 24),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].asMap().entries.map((e) => Text(e.value, style: TextStyle(fontWeight: FontWeight.bold, color: e.key == 6 ? Colors.red : Colors.blueGrey))).toList()),
-        const SizedBox(height: 16),
-        Container(height: 32, decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), gradient: const LinearGradient(colors: [Color(0xFFA5D8FF), Color(0xFFFFD93D), Color(0xFFFF9B9B)])), child: Stack(alignment: Alignment.center, children: [
-          Positioned(left: 40, child: Container(width: 24, height: 24, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: const Icon(Icons.wb_sunny_outlined, size: 16, color: Colors.orange))),
-          Positioned(right: 40, child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)), child: const Text('29°', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black)))),
-        ])),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCardBg : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(children: [
+        Text(emoji, style: const TextStyle(fontSize: 24)),
+        const SizedBox(height: 8),
+        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+      ]),
+    );
+  }
+
+  Widget _buildForecast(List<dynamic> forecast, bool isDark) {
+    if (forecast.isEmpty) return const SizedBox.shrink();
+
+    final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(color: isDark ? AppColors.darkCardBg : Colors.white, borderRadius: BorderRadius.circular(32)),
+      padding: const EdgeInsets.all(24),
+      child: Column(children: [
+        const Row(children: [
+          Icon(Icons.calendar_today_outlined, size: 18),
+          SizedBox(width: 8),
+          Text('7-Day Forecast', style: TextStyle(fontWeight: FontWeight.bold)),
+        ]),
+        const SizedBox(height: 20),
+        ...forecast.map((day) {
+          final date = DateTime.tryParse(day['date'] ?? '');
+          final dayName = date != null ? days[date.weekday - 1] : '??';
+          final isToday = date != null && date.day == DateTime.now().day && date.month == DateTime.now().month;
+          final code = day['weather_code'] ?? 0;
+          final info = WeatherService.weatherCodeToInfo(code);
+          final hi = (day['temp_max'] ?? 0).toStringAsFixed(0);
+          final lo = (day['temp_min'] ?? 0).toStringAsFixed(0);
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(children: [
+              SizedBox(width: 50, child: Text(isToday ? 'Today' : dayName, style: TextStyle(fontWeight: isToday ? FontWeight.bold : FontWeight.normal, color: isToday ? Colors.lightBlue : null))),
+              Text(info['icon'], style: const TextStyle(fontSize: 20)),
+              const SizedBox(width: 8),
+              Expanded(child: Text(info['desc'], style: TextStyle(fontSize: 13, color: Colors.grey[500]))),
+              Text('$hi°', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(' / $lo°', style: TextStyle(color: Colors.grey[400])),
+            ]),
+          );
+        }),
       ]),
     );
   }
 }
 
+// ─────────────────────────────────────────────
+// WIDGET GALLERY PAGE
+// ─────────────────────────────────────────────
 class WidgetGalleryPage extends StatelessWidget {
   final Map<String, dynamic>? weatherData;
   const WidgetGalleryPage({super.key, this.weatherData});
 
   @override
   Widget build(BuildContext context) {
-    bool isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(title: const Text("Widget Gallery"), backgroundColor: Colors.transparent),
@@ -346,20 +456,13 @@ class WidgetGalleryPage extends StatelessWidget {
         children: [
           const Text("Long press your phone's home screen to add these widgets!", style: TextStyle(fontSize: 14, color: Colors.grey)),
           const SizedBox(height: 32),
-          
           const Text("SMALL (2X2)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.lightBlue)),
           const SizedBox(height: 12),
           Center(child: SmallWidget(data: weatherData)),
           const SizedBox(height: 40),
-
           const Text("MEDIUM (2X4)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.lightBlue)),
           const SizedBox(height: 12),
           MediumWidget(data: weatherData),
-          const SizedBox(height: 40),
-
-          const Text("WIDE (4X4)", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.lightBlue)),
-          const SizedBox(height: 12),
-          const WideWidget(),
           const SizedBox(height: 40),
         ],
       ),
@@ -374,8 +477,10 @@ class SmallWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final temp = data?['main']?['temp']?.toStringAsFixed(0) ?? '--';
-    
+    final temp = (data?['main']?['temp'] ?? 0).toStringAsFixed(0);
+    final code = data?['weather_code'] ?? 0;
+    final info = WeatherService.weatherCodeToInfo(code);
+
     return Container(
       width: 170, height: 180,
       decoration: BoxDecoration(
@@ -386,9 +491,9 @@ class SmallWidget extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.wb_sunny, color: Colors.orange, size: 48),
+          Text(info['icon'], style: const TextStyle(fontSize: 40)),
           Text('$temp°', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
-          const Text('Sunny', style: TextStyle(fontSize: 14, color: Colors.lightBlue)),
+          Text(info['desc'], style: const TextStyle(fontSize: 14, color: Colors.lightBlue)),
         ],
       ),
     );
@@ -403,10 +508,14 @@ class MediumWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
     final city = data?['name'] ?? 'Loading...';
-    final temp = data?['main']?['temp']?.toStringAsFixed(0) ?? '--';
-    final aqi = data?['aqi'] ?? '42';
-    final high = data?['main']?['temp_max']?.toStringAsFixed(0) ?? '--';
-    final low = data?['main']?['temp_min']?.toStringAsFixed(0) ?? '--';
+    final temp = (data?['main']?['temp'] ?? 0).toStringAsFixed(0);
+    final aqi = data?['aqi'] ?? 0;
+    final aqiLabel = WeatherService.aqiLabel(aqi);
+    final aqiColor = Color(WeatherService.aqiColorValue(aqi));
+    final high = (data?['main']?['temp_max'] ?? 0).toStringAsFixed(0);
+    final low = (data?['main']?['temp_min'] ?? 0).toStringAsFixed(0);
+    final code = data?['weather_code'] ?? 0;
+    final info = WeatherService.weatherCodeToInfo(code);
 
     return Container(
       width: double.infinity,
@@ -416,81 +525,41 @@ class MediumWidget extends StatelessWidget {
         borderRadius: BorderRadius.circular(32),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)],
       ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(city, style: const TextStyle(fontSize: 16, color: Colors.grey)),
-                  Text('$temp°', style: const TextStyle(fontSize: 54, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const Icon(Icons.cloud, color: Colors.blue, size: 48),
-            ],
+      child: Column(children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(city, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            Text('$temp°', style: const TextStyle(fontSize: 54, fontWeight: FontWeight.bold)),
+          ]),
+          Text(info['icon'], style: const TextStyle(fontSize: 48)),
+        ]),
+        const Divider(),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(color: aqiColor.withOpacity(isDark ? 0.3 : 0.2), borderRadius: BorderRadius.circular(20)),
+            child: Text('AQI $aqi', style: TextStyle(color: aqiColor, fontWeight: FontWeight.bold, fontSize: 12)),
           ),
-          const Divider(),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(color: Colors.lightBlue[100]!.withOpacity(isDark ? 0.2 : 1), borderRadius: BorderRadius.circular(20)),
-                child: Text('AQI $aqi', style: const TextStyle(color: Colors.lightBlue, fontWeight: FontWeight.bold, fontSize: 12)),
-              ),
-              Text('H:$high° L:$low°', style: const TextStyle(fontSize: 14)),
-            ],
-          ),
-        ],
-      ),
+          Text('H:$high° L:$low°', style: const TextStyle(fontSize: 14)),
+        ]),
+      ]),
     );
   }
 }
 
-class WideWidget extends StatelessWidget {
-  const WideWidget({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    bool isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkCardBg : Colors.white,
-        borderRadius: BorderRadius.circular(32),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(children: [Icon(Icons.calendar_today_outlined, size: 16), SizedBox(width: 8), Text('Weekly Trend', style: TextStyle(fontWeight: FontWeight.bold))]),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((day) => Column(
-              children: [
-                Text(day, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                const Icon(Icons.cloud, size: 20, color: Colors.blueGrey),
-                const Text('22°', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              ],
-            )).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
+// ─────────────────────────────────────────────
+// SETTINGS PAGE
+// ─────────────────────────────────────────────
 class SettingsPage extends StatelessWidget {
   final VoidCallback onToggleTheme;
   final bool isDark;
   const SettingsPage({super.key, required this.onToggleTheme, required this.isDark});
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text("Settings"), backgroundColor: Colors.transparent), body: ListView(children: [
-    SwitchListTile(title: const Text("Dark Mode"), subtitle: const Text("Switch between light and dark themes"), value: isDark, onChanged: (v) => onToggleTheme()),
-    const ListTile(title: Text("About Cloudy Cuddles"), subtitle: Text("Version 1.0.0")),
-  ]));
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text("Settings"), backgroundColor: Colors.transparent),
+    body: ListView(children: [
+      SwitchListTile(title: const Text("Dark Mode"), subtitle: const Text("Switch between light and dark themes"), value: isDark, onChanged: (v) => onToggleTheme()),
+      const ListTile(title: Text("About Cloudy Cuddles"), subtitle: Text("Version 1.0.0")),
+    ]),
+  );
 }
