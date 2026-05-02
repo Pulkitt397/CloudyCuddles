@@ -81,13 +81,16 @@ class WeatherService {
     int pm25 = 0;
     String primaryPollutant = '';
     try {
+      print('AQI URL: $aqiUrl');
       if (aqiRes.statusCode == 200) {
         final aqiData = json.decode(aqiRes.body);
+        print('AQI RAW: ${aqiRes.body}');
         final aqiCurrent = aqiData['current'];
         
         // Use US AQI as primary, fallback to European AQI if available
         aqi = (aqiCurrent?['us_aqi'] ?? aqiCurrent?['eaqi'] ?? 0).toInt();
         pm25 = (aqiCurrent?['pm2_5'] ?? 0).toInt();
+        print('AQI PARSED: $aqi');
         
         // Determine primary pollutant based on values
         final pm10 = (aqiCurrent?['pm10'] ?? 0).toInt();
